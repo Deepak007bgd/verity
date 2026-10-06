@@ -338,7 +338,7 @@ export function UserFormModal() {
         // modal closes (avoids setState-on-unmounted-component warnings and
         // ensures the face descriptor is stored under the correct user ID).
         //
-        const preAssignedId = uid('u');
+        const preAssignedId = crypto.randomUUID();
 
         // If a student photo was uploaded, enroll the face now (modal still open)
         if (role === 'student' && photoFile) {

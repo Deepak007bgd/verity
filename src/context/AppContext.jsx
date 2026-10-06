@@ -76,9 +76,44 @@ export function AppProvider({ children }) {
 
   // Keep the existing demo user-management experience available until the
   // Supabase feature migrations are connected in a later stage.
+  // UPDATE: We now sync the users list directly with the Supabase app_users table
   useEffect(() => {
-    saveDemoUsers(users);
-  }, [users]);
+    let active = true;
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('app_users').select('*').then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error('Error fetching users from Supabase:', error);
+          return;
+        }
+        if (data && data.length > 0) {
+          // Map snake_case database columns to camelCase used in the app
+          const mappedUsers = data.map((u) => ({
+            id: u.id,
+            uid: u.id,
+            name: u.name,
+            email: u.email,
+            password: u.password, // Using database for auth directly in demo
+            role: u.role,
+            status: u.status,
+            department: u.department,
+            regNumber: u.reg_number,
+            registerNumber: u.reg_number,
+            employeeId: u.employee_id,
+            designation: u.designation,
+            year: u.year,
+            section: u.section,
+            createdAt: new Date(u.created_at).toLocaleDateString(),
+          }));
+          setUsers(mappedUsers);
+        }
+      });
+    } else {
+      saveDemoUsers(users); // Fallback to local storage if no Supabase
+    }
+
+    return () => { active = false; };
+  }, [users.length]); // re-fetch if length changes, though we also update state locally
 
   // Restore persistent screen recordings from IndexedDB across page reloads & sessions
   useEffect(() => {
@@ -174,72 +209,74 @@ export function AppProvider({ children }) {
   const login = useCallback(async (emailOrId, password = '', opts = {}) => {
     const { dryRun = false } = opts;
 
+    let targetUser = null;
+
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: emailOrId.trim(),
-          password,
-        });
+        // Query our new global app_users table
+        const { data, error } = await supabase
+          .from('app_users')
+          .select('*')
+          .or(`email.eq.${emailOrId},id.eq.${emailOrId}`)
+          .maybeSingle();
 
-        if (!error && data?.user) {
-          const profile = await loadSupabaseProfile(data.user);
-          if (profile.status !== 'Active') {
-            await supabase.auth.signOut();
-            throw new Error('Your account has been disabled. Contact the administrator.');
-          }
-
-          if (dryRun) {
-            // Return profile for face-verification check without committing state
-            await supabase.auth.signOut();
-            return profile;
-          }
-
-          setCurrentUser(profile);
-          setView('dashboard');
-          log('Signed in', '', profile);
-          showToast(`Signed in as ${profile.name}`);
-          return true;
+        if (error) throw error;
+        if (data) {
+          // Map DB to local format
+          targetUser = {
+            id: data.id,
+            uid: data.id,
+            name: data.name,
+            email: data.email,
+            password: data.password,
+            role: data.role,
+            status: data.status,
+            department: data.department,
+            regNumber: data.reg_number,
+            employeeId: data.employee_id,
+            designation: data.designation,
+            year: data.year,
+            section: data.section,
+          };
         }
       } catch (err) {
-        if (err.message === 'Your account has been disabled. Contact the administrator.') {
-          throw err;
-        }
-        // Fall back gracefully to local demo accounts if Supabase credentials are not matched in cloud
-        console.info('Supabase sign-in not completed, checking demo accounts:', err.message);
+        console.error('Supabase DB login error:', err.message);
       }
     }
 
-    // Intentional local fallback when Supabase is not configured or demo account is used.
-    const user = users.find(
-      (u) => u.id === emailOrId || u.uid === emailOrId || u.email?.toLowerCase() === emailOrId.toLowerCase()
-    );
+    // Fallback to local memory if Supabase didn't find them (e.g. seed users)
+    if (!targetUser) {
+      targetUser = users.find(
+        (u) => u.id === emailOrId || u.uid === emailOrId || u.email?.toLowerCase() === emailOrId.toLowerCase()
+      );
+    }
 
-    if (!user) {
+    if (!targetUser) {
       showToast('User not found.');
       throw new Error('User not found.');
     }
 
-    if (user.status === 'Disabled') {
+    if (targetUser.status === 'Disabled') {
       const msg = 'Your account has been disabled. Contact the administrator.';
       showToast(msg);
       throw new Error(msg);
     }
 
-    // Validate password in demo mode
-    if (user.password && user.password !== password) {
+    // Validate plaintext password (matching what we store in app_users)
+    if (targetUser.password && targetUser.password !== password) {
       showToast('Incorrect password.');
       throw new Error('Incorrect password.');
     }
 
     if (dryRun) {
       // Return user object for face verification without setting app state
-      return user;
+      return targetUser;
     }
 
-    setCurrentUser(user);
+    setCurrentUser(targetUser);
     setView('dashboard');
-    log('Signed in', '', user);
-    showToast(`Signed in as ${user.name}`);
+    log('Signed in', '', targetUser);
+    showToast(`Signed in as ${targetUser.name}`);
     return true;
   }, [users, log, showToast]);
 
@@ -302,6 +339,31 @@ export function AppProvider({ children }) {
       ...rest,
     };
 
+    // 1. Insert into Supabase database globally
+    if (isSupabaseConfigured && supabase) {
+      const dbPayload = {
+        id: newUid,
+        name: rest.name,
+        email: rest.email,
+        password: rest.password || 'changeme',
+        role: rest.role,
+        status: 'Active',
+        department: rest.department || null,
+        reg_number: rest.regNumber || rest.registerNumber || null,
+        employee_id: rest.employeeId || null,
+        designation: rest.designation || null,
+        year: rest.year || null,
+        section: rest.section || null,
+      };
+      
+      const { error } = await supabase.from('app_users').insert(dbPayload);
+      if (error) {
+        console.error('Error adding user to Supabase:', error);
+        throw new Error('Failed to create user in database: ' + error.message);
+      }
+    }
+
+    // 2. Update local state
     setUsers((prev) => [...prev, userPayload]);
     log('Created user', `${userPayload.name} (${userPayload.role})`);
     closeModal();

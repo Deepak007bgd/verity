@@ -8,10 +8,6 @@
 
 import * as faceapi from '@vladmandic/face-api';
 
-const DB_NAME = 'verity_faces';
-const DB_VERSION = 1;
-const STORE_NAME = 'face_descriptors';
-
 // Path to model files served from /public/models/
 const MODELS_URL = '/models';
 
@@ -36,40 +32,40 @@ export async function loadFaceModels() {
   return loadingPromise;
 }
 
-// ─── IndexedDB helpers ─────────────────────────────────────────────────────────
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
-      e.target.result.createObjectStore(STORE_NAME, { keyPath: 'userId' });
-    };
-    req.onsuccess = (e) => resolve(e.target.result);
-    req.onerror = (e) => reject(e.target.error);
-  });
-}
+// ─── Supabase helpers ─────────────────────────────────────────────────────────
 
 async function saveFaceDescriptor(userId, descriptor) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put({ userId, descriptor: Array.from(descriptor) });
-    tx.oncomplete = resolve;
-    tx.onerror = (e) => reject(e.target.error);
-  });
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase must be configured to store face data globally.');
+  }
+  
+  const { error } = await supabase
+    .from('face_data')
+    .upsert({ user_id: userId, descriptor: Array.from(descriptor) });
+    
+  if (error) {
+    console.error('Error saving face data:', error);
+    throw new Error('Failed to save face descriptor to cloud database.');
+  }
 }
 
 async function getFaceDescriptor(userId) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const req = tx.objectStore(STORE_NAME).get(userId);
-    req.onsuccess = (e) => {
-      const row = e.target.result;
-      resolve(row ? new Float32Array(row.descriptor) : null);
-    };
-    req.onerror = (e) => reject(e.target.error);
-  });
+  if (!isSupabaseConfigured || !supabase) return null;
+  
+  const { data, error } = await supabase
+    .from('face_data')
+    .select('descriptor')
+    .eq('user_id', userId)
+    .maybeSingle();
+    
+  if (error) {
+    console.error('Error fetching face data:', error);
+    return null;
+  }
+  
+  return data && data.descriptor ? new Float32Array(data.descriptor) : null;
 }
 
 export async function hasRegisteredFace(userId) {
