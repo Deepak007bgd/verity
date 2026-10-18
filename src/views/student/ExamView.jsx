@@ -127,8 +127,8 @@ export function ExamView() {
     },
   });
 
-  // Anti-cheating: Page Visibility API listener (only active once exam is unlocked & recording)
-  useIntegrityMonitor(attempt?.status === 'In Progress' && hasStartedRecording && isRecording, recordIntegrityEvent);
+  // Anti-cheating & Integrity Monitor: tab switches, copy/cut/paste prevention, shortcut blocking
+  useIntegrityMonitor(attempt?.status === 'In Progress' && hasStartedRecording && isRecording, recordIntegrityEvent, showToast);
 
   if (!attempt || !assessment) {
     return <div className="empty">Test attempt not found.</div>;
@@ -455,7 +455,7 @@ export function ExamView() {
         </div>
       )}
 
-      <div className="exam-shell">
+      <div className="exam-shell" style={{ userSelect: 'none', WebkitUserSelect: 'none' }}>
         <div className="card">
           <div className="exam-q-meta">
             {q.topic} · {q.marks} mark{q.marks > 1 ? 's' : ''} ·{' '}
