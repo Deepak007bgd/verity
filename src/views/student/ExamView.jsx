@@ -59,6 +59,7 @@ export function ExamView() {
 
   const {
     videoRef,
+    setVideoRef,
     cameraActive,
     cameraError,
     audioLevel,
@@ -646,7 +647,7 @@ export function ExamView() {
         }}>
           <div style={{ position: 'relative', width: '100%', height: '128px', background: '#111827' }}>
             <video
-              ref={videoRef}
+              ref={setVideoRef}
               autoPlay
               muted
               playsInline

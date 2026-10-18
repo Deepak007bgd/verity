@@ -28,7 +28,7 @@ export function useExamTimer({ attemptId, remainingSeconds, onTick, onTimeUp, is
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [attemptId, onTick]);
+  }, [attemptId, onTick, isActive]);
 
   const mins = Math.max(0, Math.floor((remainingSeconds || 0) / 60));
   const secs = Math.max(0, (remainingSeconds || 0) % 60);

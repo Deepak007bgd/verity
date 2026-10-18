@@ -49,6 +49,27 @@ export function useExamFaceProctor({ onIntegrityViolation } = {}) {
     }, 4000);
   }, []);
 
+  // Callback ref so whenever the <video> element mounts in the DOM, it connects to streamRef immediately
+  const setVideoRef = useCallback((el) => {
+    videoRef.current = el;
+    if (el && streamRef.current) {
+      if (el.srcObject !== streamRef.current) {
+        el.srcObject = streamRef.current;
+      }
+      el.play().catch(() => {});
+    }
+  }, []);
+
+  // Also monitor cameraActive and streamRef
+  useEffect(() => {
+    if (videoRef.current && streamRef.current && cameraActive) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(() => {});
+    }
+  }, [cameraActive]);
+
   // 1. Preload Face-API ML models
   useEffect(() => {
     let active = true;
@@ -400,6 +421,7 @@ export function useExamFaceProctor({ onIntegrityViolation } = {}) {
 
   return {
     videoRef,
+    setVideoRef,
     isActive,
     cameraActive,
     modelsReady,
