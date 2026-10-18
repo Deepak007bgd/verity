@@ -31,30 +31,36 @@ export function FaceVerifyModal({ userId, userName, onVerified, onFailed, onSkip
     setStatus('scanning');
     setMessage('');
 
-    const result = await verify();
+    try {
+      const result = await verify();
 
-    if (result.ok) {
-      setStatus('success');
-      setMessage(`Face verified! Welcome back, ${userName}.`);
-      setTimeout(() => {
-        stopCamera();
-        onVerified();
-      }, 1200);
-    } else {
-      const newCount = attempts + 1;
-      setAttempts(newCount);
-
-      if (newCount >= MAX_ATTEMPTS) {
-        setStatus('failed');
-        setMessage(`Face verification failed after ${MAX_ATTEMPTS} attempts. Access denied.`);
+      if (result.ok) {
+        setStatus('success');
+        setMessage(`Face verified! Welcome back, ${userName}.`);
         setTimeout(() => {
           stopCamera();
-          onFailed();
-        }, 2000);
+          onVerified();
+        }, 1200);
       } else {
-        setStatus('idle');
-        setMessage(result.error || `Face not recognized (attempt ${newCount}/${MAX_ATTEMPTS}). Please try again.`);
+        const newCount = attempts + 1;
+        setAttempts(newCount);
+
+        if (newCount >= MAX_ATTEMPTS) {
+          setStatus('failed');
+          setMessage(`Face verification failed after ${MAX_ATTEMPTS} attempts. Access denied.`);
+          setTimeout(() => {
+            stopCamera();
+            onFailed();
+          }, 2000);
+        } else {
+          setStatus('idle');
+          setMessage(result.error || `Face not recognized (attempt ${newCount}/${MAX_ATTEMPTS}). Please try again.`);
+        }
       }
+    } catch (err) {
+      console.error('handleVerify error:', err);
+      setStatus('idle');
+      setMessage(err.message || 'An error occurred during verification. Please try again.');
     }
   };
 

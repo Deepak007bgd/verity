@@ -47,25 +47,30 @@ async function saveFaceDescriptor(userId, descriptor) {
     
   if (error) {
     console.error('Error saving face data:', error);
-    throw new Error('Failed to save face descriptor to cloud database.');
+    throw new Error(error.message || 'Failed to save face descriptor to cloud database.');
   }
 }
 
 async function getFaceDescriptor(userId) {
-  if (!isSupabaseConfigured || !supabase) return null;
+  if (!isSupabaseConfigured || !supabase || !userId) return null;
   
-  const { data, error } = await supabase
-    .from('face_data')
-    .select('descriptor')
-    .eq('user_id', userId)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from('face_data')
+      .select('descriptor')
+      .eq('user_id', userId)
+      .maybeSingle();
+      
+    if (error) {
+      console.warn('Error fetching face data for user:', userId, error.message);
+      return null;
+    }
     
-  if (error) {
-    console.error('Error fetching face data:', error);
+    return data && data.descriptor ? new Float32Array(data.descriptor) : null;
+  } catch (err) {
+    console.warn('Network error fetching face data:', err.message);
     return null;
   }
-  
-  return data && data.descriptor ? new Float32Array(data.descriptor) : null;
 }
 
 export async function hasRegisteredFace(userId) {
@@ -96,54 +101,63 @@ async function detectSingleFace(videoOrImageEl) {
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 export async function registerFace(userId, videoEl) {
-  await loadFaceModels();
+  try {
+    await loadFaceModels();
 
-  const detection = await detectSingleFace(videoEl);
-  if (!detection) {
-    return { ok: false, error: 'No face detected. Please look directly at the camera and try again.' };
+    const detection = await detectSingleFace(videoEl);
+    if (!detection) {
+      return { ok: false, error: 'No face detected. Please look directly at the camera and try again.' };
+    }
+
+    await saveFaceDescriptor(userId, detection.descriptor);
+    return { ok: true };
+  } catch (err) {
+    console.error('registerFace error:', err);
+    return { ok: false, error: err.message || 'Failed to save face data to database.' };
   }
-
-  await saveFaceDescriptor(userId, detection.descriptor);
-  return { ok: true };
 }
 
 /**
  * Register (enroll) a face from an image File/Blob uploaded by the admin.
  * Converts the file to an HTMLImageElement, detects the face, and stores
- * the descriptor in IndexedDB — identical storage to webcam enrolment so
- * the student skips the FaceEnrollModal entirely at login.
+ * the descriptor in the database.
  *
  * @param {string}      userId    - The student's unique ID
  * @param {File|Blob}   imageFile - Photo file selected by the admin
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 export async function registerFaceFromImage(userId, imageFile) {
-  await loadFaceModels();
-
-  // Convert File/Blob → object URL → HTMLImageElement
-  const objectUrl = URL.createObjectURL(imageFile);
   try {
-    const img = await new Promise((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('Could not load the uploaded image.'));
-      el.src = objectUrl;
-    });
+    await loadFaceModels();
 
-    const detection = await detectSingleFace(img);
-    if (!detection) {
-      return {
-        ok: false,
-        error:
-          'No face detected in the uploaded photo. Please use a clear, front-facing portrait with good lighting.',
-      };
+    // Convert File/Blob → object URL → HTMLImageElement
+    const objectUrl = URL.createObjectURL(imageFile);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('Could not load the uploaded image.'));
+        el.src = objectUrl;
+      });
+
+      const detection = await detectSingleFace(img);
+      if (!detection) {
+        return {
+          ok: false,
+          error:
+            'No face detected in the uploaded photo. Please use a clear, front-facing portrait with good lighting.',
+        };
+      }
+
+      await saveFaceDescriptor(userId, detection.descriptor);
+      return { ok: true };
+    } finally {
+      // Always revoke the temporary URL to free memory
+      URL.revokeObjectURL(objectUrl);
     }
-
-    await saveFaceDescriptor(userId, detection.descriptor);
-    return { ok: true };
-  } finally {
-    // Always revoke the temporary URL to free memory
-    URL.revokeObjectURL(objectUrl);
+  } catch (err) {
+    console.error('registerFaceFromImage error:', err);
+    return { ok: false, error: err.message || 'Failed to save face data from image.' };
   }
 }
 

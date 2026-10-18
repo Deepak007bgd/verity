@@ -213,11 +213,12 @@ export function AppProvider({ children }) {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Query our new global app_users table
+        const cleanInput = emailOrId.trim();
+        // Query our new global app_users table (case-insensitive email or ID)
         const { data, error } = await supabase
           .from('app_users')
           .select('*')
-          .or(`email.eq.${emailOrId},id.eq.${emailOrId}`)
+          .or(`email.ilike.${cleanInput},id.eq.${cleanInput}`)
           .maybeSingle();
 
         if (error) throw error;
@@ -240,7 +241,7 @@ export function AppProvider({ children }) {
           };
         }
       } catch (err) {
-        console.error('Supabase DB login error:', err.message);
+        console.warn('Supabase DB login lookup note:', err.message);
       }
     }
 
@@ -327,7 +328,7 @@ export function AppProvider({ children }) {
   const addUser = useCallback(async (data) => {
     // Allow callers to supply a pre-assigned ID so face enrollment can use the
     // same ID before the modal closes (avoids setState on unmounted component).
-    const { _preAssignedId, ...rest } = data;
+    const { _preAssignedId, keepModalOpen, ...rest } = data;
     const newUid = _preAssignedId || uid('u');
 
     const userPayload = {
@@ -366,8 +367,11 @@ export function AppProvider({ children }) {
     // 2. Update local state
     setUsers((prev) => [...prev, userPayload]);
     log('Created user', `${userPayload.name} (${userPayload.role})`);
-    closeModal();
+    if (!keepModalOpen) {
+      closeModal();
+    }
     showToast(`User "${userPayload.name}" created successfully`);
+    return newUid;
   }, [currentUser, log, closeModal, showToast]);
 
 

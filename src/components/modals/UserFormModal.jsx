@@ -334,31 +334,33 @@ export function UserFormModal() {
       } else {
         // ── Creating new user ───────────────────────────────────────────────
         //
-        // KEY FIX: Generate the ID here so we can enroll the face BEFORE the
-        // modal closes (avoids setState-on-unmounted-component warnings and
-        // ensures the face descriptor is stored under the correct user ID).
+        // KEY FIX: Generate the ID and create the user FIRST in the database.
+        // This ensures the record exists before inserting face data, avoiding
+        // foreign key constraint errors and guaranteeing the user can always log in!
         //
         const preAssignedId = crypto.randomUUID();
 
-        // If a student photo was uploaded, enroll the face now (modal still open)
+        // 1. Save user to database
+        await addUser({ ...data, _preAssignedId: preAssignedId, keepModalOpen: true });
+
+        // 2. If a student photo was uploaded, enroll the face now
         if (role === 'student' && photoFile) {
           setFaceStatus({ state: 'detecting', msg: '' });
           await loadFaceModels();
           const result = await registerFaceFromImage(preAssignedId, photoFile);
 
           if (!result.ok) {
-            // Face enrollment failed — show error in modal, don't create user yet
             setFaceStatus({ state: 'error', msg: result.error });
             setSubmitting(false);
+            // User is created; wait a bit to show notice, then close
+            setTimeout(() => closeModal(), 2000);
             return;
           }
           setFaceStatus({ state: 'success', msg: '' });
-          // Brief pause so admin sees the ✅ before the modal closes
           await new Promise((r) => setTimeout(r, 800));
         }
 
-        // Pass the pre-assigned ID so addUser uses the same ID the face was enrolled under
-        await addUser({ ...data, _preAssignedId: preAssignedId });
+        closeModal();
       }
 
     } catch (err) {

@@ -29,24 +29,30 @@ export function FaceEnrollModal({ userId, userName, onEnrolled, onCancel }) {
   const handleCapture = async () => {
     setStatus('capturing');
     setMessage('');
-    // 3-second countdown for user to position face
-    for (let i = 3; i >= 1; i--) {
-      setCountdown(i);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    setCountdown(null);
+    try {
+      // 3-second countdown for user to position face
+      for (let i = 3; i >= 1; i--) {
+        setCountdown(i);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      setCountdown(null);
 
-    const result = await enroll();
-    if (result.ok) {
-      setStatus('success');
-      setMessage('Face registered successfully! You can now log in using face verification.');
-      setTimeout(() => {
-        stopCamera();
-        onEnrolled();
-      }, 1800);
-    } else {
+      const result = await enroll();
+      if (result.ok) {
+        setStatus('success');
+        setMessage('Face registered successfully! You can now log in using face verification.');
+        setTimeout(() => {
+          stopCamera();
+          onEnrolled();
+        }, 1800);
+      } else {
+        setStatus('error');
+        setMessage(result.error || 'Could not detect a face. Please try again.');
+      }
+    } catch (err) {
+      console.error('handleCapture error:', err);
       setStatus('error');
-      setMessage(result.error || 'Could not detect a face. Please try again.');
+      setMessage(err.message || 'An error occurred while registering your face. Please try again.');
     }
   };
 
