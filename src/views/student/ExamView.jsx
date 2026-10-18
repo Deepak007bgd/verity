@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { useExamTimer } from '../../hooks/useExamTimer';
 import { useIntegrityMonitor } from '../../hooks/useIntegrityMonitor';
 import { useScreenRecorder } from '../../hooks/useScreenRecorder';
+import { useExamFaceProctor } from '../../hooks/useExamFaceProctor';
 import { Button } from '../../components/common/Button';
 
 export function ExamView() {
@@ -50,16 +51,38 @@ export function ExamView() {
     onIntegrityViolation: handleRecordingIntegrityViolation,
   });
 
-  // Stop recording if disqualified
+  // AI Webcam Face & Microphone Proctoring Integration
+  const handleProctorIntegrityViolation = useCallback((event) => {
+    recordIntegrityEvent(event);
+    showToast(`⚠️ Proctor Alert: ${event.details || event.type}`);
+  }, [recordIntegrityEvent, showToast]);
+
+  const {
+    videoRef,
+    cameraActive,
+    cameraError,
+    audioLevel,
+    activeAlert,
+    isRecording: isWebcamRecording,
+    startProctoring,
+    stopProctoring,
+  } = useExamFaceProctor({
+    onIntegrityViolation: handleProctorIntegrityViolation,
+  });
+
+  // Stop recording & proctoring if disqualified
   useEffect(() => {
-    if ((attempt?.status === 'Disqualified' || attempt?.disqualified) && isRecording) {
-      stopRecording().then((res) => {
-        if (res?.url) {
-          saveScreenRecording(examAttemptId, res);
-        }
-      });
+    if ((attempt?.status === 'Disqualified' || attempt?.disqualified)) {
+      if (isRecording) {
+        stopRecording().then((res) => {
+          if (res?.url) {
+            saveScreenRecording(examAttemptId, res);
+          }
+        });
+      }
+      stopProctoring().catch(() => {});
     }
-  }, [attempt?.status, attempt?.disqualified, isRecording, stopRecording, saveScreenRecording, examAttemptId]);
+  }, [attempt?.status, attempt?.disqualified, isRecording, stopRecording, stopProctoring, saveScreenRecording, examAttemptId]);
 
   const handleOpenSubmitConfirm = () => {
     openModal('submitConfirm', {
@@ -123,31 +146,31 @@ export function ExamView() {
     );
   }
 
-  // Pre-test Proctoring Screen: Student MUST start screen recording before viewing questions
+  // Pre-test Proctoring Screen: Student MUST start screen recording & AI camera/mic proctoring before viewing questions
   if (!hasStartedRecording) {
     return (
-      <div style={{ maxWidth: '640px', margin: '30px auto' }}>
+      <div style={{ maxWidth: '660px', margin: '30px auto' }}>
         <div className="card" style={{ padding: '36px', textAlign: 'center' }}>
           <div style={{
-            width: '68px',
-            height: '68px',
-            borderRadius: '18px',
+            width: '72px',
+            height: '72px',
+            borderRadius: '20px',
             background: 'var(--coral-light)',
             color: 'var(--coral)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '32px',
+            fontSize: '34px',
             marginBottom: '18px',
             boxShadow: '0 8px 24px rgba(240, 83, 62, 0.18)',
           }}>
             📹
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', color: 'var(--ink)' }}>
-            Proctored Assessment Verification
+            AI-Proctored Exam Verification
           </h2>
-          <p style={{ color: 'var(--ink-soft)', fontSize: '14px', maxWidth: '480px', margin: '0 auto 22px', lineHeight: '1.5' }}>
-            <strong>{assessment.title}</strong> requires continuous screen recording throughout your test session. Questions and exam timer unlock only when screen recording begins.
+          <p style={{ color: 'var(--ink-soft)', fontSize: '14px', maxWidth: '520px', margin: '0 auto 22px', lineHeight: '1.5' }}>
+            <strong>{assessment.title}</strong> is monitored with continuous screen recording, AI webcam face &amp; mouth occlusion tracking, and microphone audio analysis.
           </p>
 
           <div style={{
@@ -162,16 +185,18 @@ export function ExamView() {
             color: 'var(--ink-soft)',
           }}>
             <div style={{ fontWeight: '600', color: 'var(--ink)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>🛡️</span> Academic Integrity Requirements:
+              <span>🛡️</span> Mandatory Academic Integrity Checks:
             </div>
-            <ul style={{ paddingLeft: '20px', margin: 0 }}>
-              <li><strong>Continuous Screen Recording:</strong> Your screen will be recorded and attached to your attempt for teacher review.</li>
-              <li><strong>Strict Tab Limit:</strong> Maximum <strong>3 tab switches</strong> allowed. Switching tabs more than 3 times will instantly disqualify you.</li>
-              <li><strong>Do Not Disconnect:</strong> Stopping screen sharing mid-exam freezes your test session immediately until resumed.</li>
+            <ul style={{ paddingLeft: '20px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <li><strong>Continuous Screen Recording:</strong> Your entire screen is captured and recorded for instructor review.</li>
+              <li><strong>AI Face Visibility:</strong> You must remain in front of the camera. Turning away or leaving the frame triggers an alert.</li>
+              <li><strong>Mouth &amp; Face Occlusion Detection:</strong> Covering your lips, mouth, or face with hands or objects triggers an immediate integrity warning.</li>
+              <li><strong>Microphone Audio Monitoring:</strong> Any talking, whispering, or abnormal room noise is detected and logged.</li>
+              <li><strong>Strict Tab Limit:</strong> Maximum <strong>3 tab switches</strong> allowed before automatic disqualification.</li>
             </ul>
           </div>
 
-          {recordingError && (
+          {(recordingError || cameraError) && (
             <div style={{
               background: 'var(--coral-light)',
               color: 'var(--coral)',
@@ -182,7 +207,7 @@ export function ExamView() {
               fontSize: '13px',
               textAlign: 'left',
             }}>
-              ⚠️ {recordingError}
+              ⚠️ {recordingError || cameraError}
             </div>
           )}
 
@@ -190,9 +215,16 @@ export function ExamView() {
             variant="coral"
             size="lg"
             onClick={async () => {
-              const ok = await startRecording();
-              if (ok) {
+              // 1. Start AI Camera & Mic Proctoring
+              const proctorOk = await startProctoring();
+              if (!proctorOk) return;
+
+              // 2. Start Screen Recording
+              const screenOk = await startRecording();
+              if (screenOk) {
                 setHasStartedRecording(true);
+              } else {
+                stopProctoring();
               }
             }}
             style={{
@@ -204,7 +236,7 @@ export function ExamView() {
             }}
           >
             <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#fff', animation: 'pulse 1.5s infinite' }} />
-            Start Screen Recording to Begin Exam
+            Start AI Proctoring &amp; Screen Recording to Begin Exam
           </Button>
         </div>
       </div>
@@ -395,6 +427,33 @@ export function ExamView() {
         </div>
       )}
 
+      {/* Real-time AI Proctor Warning Banner */}
+      {activeAlert && (
+        <div style={{
+          background: activeAlert.level === 'danger' ? 'var(--coral-light)' : 'var(--amber-light)',
+          color: activeAlert.level === 'danger' ? 'var(--coral)' : 'var(--amber)',
+          border: `2px solid ${activeAlert.level === 'danger' ? 'var(--coral)' : 'var(--amber)'}`,
+          padding: '12px 18px',
+          borderRadius: '10px',
+          marginBottom: '16px',
+          fontSize: '14px',
+          fontWeight: '600',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          boxShadow: '0 4px 16px rgba(240, 83, 62, 0.25)',
+          animation: 'pulse 1.5s infinite',
+        }}>
+          <span style={{ fontSize: '24px' }}>🚨</span>
+          <div style={{ flex: 1 }}>
+            <div><strong>PROCTORING INTEGRITY WARNING:</strong> {activeAlert.message}</div>
+            <div style={{ fontSize: '11.5px', fontWeight: '400', opacity: 0.9, marginTop: '2px' }}>
+              This integrity violation has been logged to your exam attempt audit trail.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="exam-shell">
         <div className="card">
           <div className="exam-q-meta">
@@ -564,11 +623,112 @@ export function ExamView() {
             </Button>
 
             <div className="integrity-note">
-              🛡️ <strong>Anti-Cheating & Proctoring:</strong> Continuous screen recording and tab switching are monitored. More than 3 tab switches results in automatic disqualification.
+              🛡️ <strong>Anti-Cheating &amp; Proctoring:</strong> Continuous screen recording, live AI webcam facial monitoring, microphone audio analysis, and tab switches are monitored in real time.
             </div>
           </div>
         </div>
       </div>
+
+      {/* Floating AI Proctor Camera & Mic PIP Widget */}
+      {cameraActive && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          width: '184px',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          background: 'var(--card)',
+          border: activeAlert ? '2.5px solid var(--coral)' : '2px solid var(--teal)',
+          boxShadow: activeAlert ? '0 8px 24px rgba(240, 83, 62, 0.45)' : '0 8px 24px rgba(0,0,0,0.18)',
+          zIndex: 999,
+          transition: 'all 0.3s ease',
+        }}>
+          <div style={{ position: 'relative', width: '100%', height: '128px', background: '#111827' }}>
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                transform: 'scaleX(-1)', // Mirrored for natural student webcam preview
+              }}
+            />
+            {/* Status badge overlay */}
+            <div style={{
+              position: 'absolute',
+              top: '6px',
+              left: '6px',
+              background: activeAlert ? 'rgba(240, 83, 62, 0.9)' : 'rgba(13, 148, 136, 0.9)',
+              color: '#fff',
+              padding: '2px 7px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontWeight: '700',
+              letterSpacing: '0.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              backdropFilter: 'blur(4px)',
+            }}>
+              <span style={{
+                display: 'inline-block',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: '#fff',
+                animation: activeAlert ? 'pulse 0.8s infinite' : 'none',
+              }} />
+              {activeAlert ? 'ALERT' : 'AI PROCTOR'}
+            </div>
+
+            {/* REC indicator */}
+            {isWebcamRecording && (
+              <div style={{
+                position: 'absolute',
+                top: '6px',
+                right: '6px',
+                background: 'rgba(0,0,0,0.65)',
+                color: '#fff',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                fontSize: '9px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--coral)', display: 'inline-block' }} />
+                REC
+              </div>
+            )}
+          </div>
+
+          {/* Audio Level & Status Footer */}
+          <div style={{ padding: '7px 9px', background: 'var(--card)', fontSize: '11px', borderTop: '1px solid var(--line)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ color: 'var(--ink-soft)', fontSize: '10.5px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                🎙️ Mic: {audioLevel > 48 ? <span style={{ color: 'var(--coral)', fontWeight: '700' }}>NOISE</span> : 'Quiet'}
+              </span>
+              <span style={{ fontSize: '10px', fontWeight: '600', color: audioLevel > 48 ? 'var(--coral)' : 'var(--ink-muted)' }}>
+                {audioLevel}%
+              </span>
+            </div>
+            {/* Real-time sound level bar */}
+            <div style={{ width: '100%', height: '4px', background: 'var(--line)', borderRadius: '2px', overflow: 'hidden' }}>
+              <div style={{
+                width: `${audioLevel}%`,
+                height: '100%',
+                background: audioLevel > 48 ? 'var(--coral)' : audioLevel > 28 ? 'var(--amber)' : 'var(--teal)',
+                transition: 'width 0.15s ease, background 0.2s',
+              }} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
