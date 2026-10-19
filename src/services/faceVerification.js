@@ -84,9 +84,11 @@ export async function hasRegisteredFace(userId) {
 
 // ─── Detection helper ──────────────────────────────────────────────────────────
 
-const TINY_OPTIONS = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+const TINY_OPTIONS = new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.6 });
 
 async function detectSingleFace(videoOrImageEl) {
+  // Yield to event loop so the UI stays responsive during ML inference
+  await new Promise((r) => setTimeout(r, 0));
   return faceapi
     .detectSingleFace(videoOrImageEl, TINY_OPTIONS)
     .withFaceLandmarks(true)

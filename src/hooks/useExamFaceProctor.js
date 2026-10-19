@@ -143,15 +143,17 @@ export function useExamFaceProctor({ onIntegrityViolation } = {}) {
   // 3. Setup Face & Mouth Occlusion Analysis
   const setupVisionAnalysis = useCallback(() => {
     const TINY_PROCTOR_OPTIONS = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 224,
-      scoreThreshold: 0.35,
+      inputSize: 160,
+      scoreThreshold: 0.5,
     });
 
-    // Run computer vision check every 1.5 seconds
+    // Run computer vision check every 2 seconds
     visionIntervalRef.current = setInterval(async () => {
       if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) return;
 
       try {
+        // Yield to event loop so the UI stays responsive during ML inference
+        await new Promise((r) => setTimeout(r, 0));
         const detections = await faceapi
           .detectAllFaces(videoRef.current, TINY_PROCTOR_OPTIONS)
           .withFaceLandmarks(true);

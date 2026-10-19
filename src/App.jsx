@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useApp } from './context/AppContext';
 import { AppShell } from './components/layout/AppShell';
 import { Toast } from './components/common/Toast';
@@ -23,8 +23,15 @@ import { AdminDashboard } from './views/admin/AdminDashboard';
 import { UsersView } from './views/admin/UsersView';
 import { AuditLogView } from './views/admin/AuditLogView';
 
+import { loadFaceModels } from './services/faceVerification';
+
 export function App() {
   const { currentUser, view, toastMessage } = useApp();
+
+  // Pre-warm face-api models at app start so the first login detection is instant
+  useEffect(() => {
+    loadFaceModels().catch(() => {});
+  }, []);
 
   if (!currentUser) {
     return (
